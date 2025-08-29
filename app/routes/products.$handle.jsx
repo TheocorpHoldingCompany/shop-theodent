@@ -3,7 +3,7 @@
 import {defer} from '@shopify/remix-oxygen';
 import { Await, useLoaderData } from 'react-router';
 import {Suspense} from 'react';
-import {gql} from '@shopify/hydrogen';
+// Removed gql import
 
 import {
   Image,
@@ -108,8 +108,8 @@ export default function Product() {
   );
 }
 
-// The GraphQL query for a single product page.
-const PRODUCT_QUERY = gql`
+// Converted from gql template to template literal and fixed Media query
+const PRODUCT_QUERY = `#graphql
   query Product(
     $country: CountryCode
     $language: LanguageCode
@@ -129,12 +129,14 @@ const PRODUCT_QUERY = gql`
         nodes {
           id
           mediaContentType
-          image {
-            id
-            url
-            altText
-            width
-            height
+          ... on MediaImage {
+            image {
+              id
+              url
+              altText
+              width
+              height
+            }
           }
         }
       }

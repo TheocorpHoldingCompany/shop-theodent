@@ -1,8 +1,8 @@
 // app/lib/fragments.js
 
-import {gql} from '@shopify/hydrogen';
+// Removed gql import and converted all fragments to template literals
 
-export const MEDIA_FRAGMENT = gql`
+export const MEDIA_FRAGMENT = `#graphql
   fragment Media on Media {
     mediaContentType
     alt
@@ -39,7 +39,7 @@ export const MEDIA_FRAGMENT = gql`
   }
 `;
 
-export const PRODUCT_CARD_FRAGMENT = gql`
+export const PRODUCT_CARD_FRAGMENT = `#graphql
   fragment ProductCard on Product {
     id
     title
@@ -67,7 +67,7 @@ export const PRODUCT_CARD_FRAGMENT = gql`
   }
 `;
 
-export const ARTICLE_FRAGMENT = gql`
+export const ARTICLE_FRAGMENT = `#graphql
   fragment Article on Article {
     author: authorV2 {
       name

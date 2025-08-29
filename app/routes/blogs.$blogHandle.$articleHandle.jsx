@@ -3,7 +3,7 @@
 import {json} from '@shopify/remix-oxygen';
 import { useLoaderData, Link } from 'react-router';
 import {Image} from '@shopify/hydrogen';
-import gql from 'graphql-tag';
+// Removed gql import
 
 // import {IconBar} from '~/components/sections/IconBar';
 
@@ -86,7 +86,8 @@ export default function Article() {
   );
 }
 
-const SINGLE_ARTICLE_QUERY = gql`
+// Converted from gql template to template literal
+const SINGLE_ARTICLE_QUERY = `#graphql
   query Article(
     $language: LanguageCode
     $blogHandle: String!

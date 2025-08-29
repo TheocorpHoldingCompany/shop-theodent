@@ -2,7 +2,7 @@
 
 import {json, redirect} from '@shopify/remix-oxygen';
 import { Form, useActionData } from 'react-router';
-import {gql} from '@shopify/hydrogen';
+// Removed the gql import - we'll use template literal syntax instead
 
 export async function action({request, params, context}) {
   const {id, token} = params;
@@ -89,7 +89,8 @@ export default function Reset() {
   );
 }
 
-const CUSTOMER_RESET_MUTATION = gql`
+// Changed from gql template to standard template literal with #graphql comment
+const CUSTOMER_RESET_MUTATION = `#graphql
   mutation customerReset($id: ID!, $input: CustomerResetInput!) {
     customerReset(id: $id, input: $input) {
       customerAccessToken {

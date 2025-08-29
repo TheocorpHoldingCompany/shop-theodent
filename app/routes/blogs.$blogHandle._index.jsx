@@ -3,7 +3,7 @@
 import {json} from '@shopify/remix-oxygen';
 import { useLoaderData } from 'react-router';
 import {ARTICLE_FRAGMENT} from '~/lib/fragments';
-import {gql} from '@shopify/hydrogen';
+// Removed gql import
 
 import {ArticleCard} from '~/components/cards/ArticleCard';
 import {getImageLoadingPriority} from '~/lib/const';
@@ -63,7 +63,8 @@ export default function Blog() {
   );
 }
 
-const BLOG_ARTICLES_QUERY = gql`
+// Converted from gql template to template literal
+const BLOG_ARTICLES_QUERY = `#graphql
   ${ARTICLE_FRAGMENT}
   query BlogArticlesQuery(
     $language: LanguageCode

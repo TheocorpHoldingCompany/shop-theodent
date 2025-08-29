@@ -2,6 +2,7 @@
 
 import {json, redirect} from '@shopify/remix-oxygen';
 import { Form, useActionData } from 'react-router';
+import gql from 'graphql-tag';
 
 export async function loader({context}) {
   const customerAccessToken = await context.session.get('customerAccessToken');
