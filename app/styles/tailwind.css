@@ -112,7 +112,7 @@ body {
     }
   
     body {
-      @apply antialiased text-primary/90 bg-contrast border-primary/10;
+      @apply antialiased text-[#2A1B16]/90 bg-contrast border-[#2A1B16]/10;
     }
   
     html {
@@ -155,9 +155,9 @@ body {
       h4,
       h5,
       h6 {
-        @apply font-sans text-primary;
+        @apply font-sans text-[#2A1B16];
       }
-      @apply mb-12 font-serif prose mx-auto grid justify-center text-primary;
+      @apply mb-12 font-serif prose mx-auto grid justify-center text-[#2A1B16];
       p,
       ul,
       li {
@@ -738,5 +738,3 @@ body {
   .progus-store-locator {
     height: 600px;
   }
-  
-  
