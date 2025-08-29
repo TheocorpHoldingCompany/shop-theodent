@@ -1,3 +1,5 @@
+// vite.config.js
+
 import {defineConfig} from 'vite';
 import {hydrogen} from '@shopify/hydrogen/vite';
 import {oxygen} from '@shopify/mini-oxygen/vite';
@@ -13,24 +15,25 @@ export default defineConfig({
     reactRouter(),
     tsconfigPaths(),
   ],
+  // ADDED: These sections are needed for the build process.
   build: {
-    // Allow a strict Content-Security-Policy
-    // withtout inlining assets as base64:
     assetsInlineLimit: 0,
   },
   ssr: {
     optimizeDeps: {
-      /**
-       * Include dependencies here if they throw CJS<>ESM errors.
-       * For example, for the following error:
-       *
-       * > ReferenceError: module is not defined
-       * >   at /Users/.../node_modules/example-dep/index.js:1:1
-       *
-       * Include 'example-dep' in the array below.
-       * @see https://vitejs.dev/config/dep-optimization-options
-       */
-      include: [],
+      include: [
+        'ts-easing',
+        'fast-shallow-equal',
+        'react-universal-interface',
+        'screenfull',
+        'nano-css/addon/vcssom/cssToTree',
+        'nano-css/addon/vcssom',
+        'nano-css/addon/cssom',
+        'nano-css',
+        'copy-to-clipboard',
+        'js-cookie',
+        'fast-deep-equal/react',
+      ],
     },
   },
 });

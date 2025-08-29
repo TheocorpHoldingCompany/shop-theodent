@@ -1,136 +1,75 @@
-import {Link, useLoaderData} from 'react-router';
-import {Image, getPaginationVariables} from '@shopify/hydrogen';
-import {PaginatedResourceSection} from '~/components/PaginatedResourceSection';
-import {redirectIfHandleIsLocalized} from '~/lib/redirect';
+// app/routes/blogs.$blogHandle._index.jsx
 
-/**
- * @type {MetaFunction<typeof loader>}
- */
-export const meta = ({data}) => {
-  return [{title: `Hydrogen | ${data?.blog.title ?? ''} blog`}];
-};
+import {json} from '@shopify/remix-oxygen';
+import { useLoaderData } from 'react-router';
+import {ARTICLE_FRAGMENT} from '~/lib/fragments';
+import {gql} from '@shopify/hydrogen';
 
-/**
- * @param {LoaderFunctionArgs} args
- */
-export async function loader(args) {
-  // Start fetching non-critical data without blocking time to first byte
-  const deferredData = loadDeferredData(args);
+import {ArticleCard} from '~/components/cards/ArticleCard';
+import {getImageLoadingPriority} from '~/lib/const';
+// import {IconBar} from '~/components/sections/IconBar';
+// import {PageHeader} from '~/components/sections/PageHeader';
 
-  // Await the critical data required to render initial state of the page
-  const criticalData = await loadCriticalData(args);
+export async function loader({params, context}) {
+  const {blogHandle} = params;
+  const {storefront} = context;
 
-  return {...deferredData, ...criticalData};
-}
-
-/**
- * Load data necessary for rendering content above the fold. This is the critical data
- * needed to render the page. If it's unavailable, the whole page should 400 or 500 error.
- * @param {LoaderFunctionArgs}
- */
-async function loadCriticalData({context, request, params}) {
-  const paginationVariables = getPaginationVariables(request, {
-    pageBy: 4,
+  const {blog} = await storefront.query(BLOG_ARTICLES_QUERY, {
+    variables: {
+      blogHandle,
+      pageBy: 20, // You can adjust the number of articles per page
+      country: storefront.i18n.country,
+      language: storefront.i18n.language,
+    },
   });
 
-  if (!params.blogHandle) {
-    throw new Response(`blog not found`, {status: 404});
-  }
-
-  const [{blog}] = await Promise.all([
-    context.storefront.query(BLOGS_QUERY, {
-      variables: {
-        blogHandle: params.blogHandle,
-        ...paginationVariables,
-      },
-    }),
-    // Add other queries here, so that they are loaded in parallel
-  ]);
-
   if (!blog?.articles) {
-    throw new Response('Not found', {status: 404});
+    throw new Response(null, {status: 404});
   }
 
-  redirectIfHandleIsLocalized(request, {handle: params.blogHandle, data: blog});
-
-  return {blog};
+  return json({blog});
 }
 
-/**
- * Load data for rendering content below the fold. This data is deferred and will be
- * fetched after the initial page load. If it's unavailable, the page should still 200.
- * Make sure to not throw any errors here, as it will cause the page to 500.
- * @param {LoaderFunctionArgs}
- */
-function loadDeferredData({context}) {
-  return {};
+export function meta({data}) {
+  const {blog} = data;
+  return [
+    {title: blog?.title ?? 'Blog'},
+    {description: blog?.seo?.description},
+  ];
 }
 
 export default function Blog() {
-  /** @type {LoaderReturnData} */
   const {blog} = useLoaderData();
   const {articles} = blog;
 
   return (
-    <div className="blog">
-      <h1>{blog.title}</h1>
-      <div className="blog-grid">
-        <PaginatedResourceSection connection={articles}>
-          {({node: article, index}) => (
-            <ArticleItem
-              article={article}
+    <>
+      {/* <PageHeader title={blog.title} /> */}
+      <h1 className="text-4xl font-bold text-center my-8">{blog.title}</h1>
+      <div className="container py-8">
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
+          {articles.nodes.map((article, i) => (
+            <ArticleCard
               key={article.id}
-              loading={index < 2 ? 'eager' : 'lazy'}
+              blogHandle={blog.handle}
+              article={article}
+              loading={getImageLoadingPriority(i, 3)}
             />
-          )}
-        </PaginatedResourceSection>
+          ))}
+        </div>
       </div>
-    </div>
+      {/* <IconBar /> */}
+    </>
   );
 }
 
-/**
- * @param {{
- *   article: ArticleItemFragment;
- *   loading?: HTMLImageElement['loading'];
- * }}
- */
-function ArticleItem({article, loading}) {
-  const publishedAt = new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(new Date(article.publishedAt));
-  return (
-    <div className="blog-article" key={article.id}>
-      <Link to={`/blogs/${article.blog.handle}/${article.handle}`}>
-        {article.image && (
-          <div className="blog-article-image">
-            <Image
-              alt={article.image.altText || article.title}
-              aspectRatio="3/2"
-              data={article.image}
-              loading={loading}
-              sizes="(min-width: 768px) 50vw, 100vw"
-            />
-          </div>
-        )}
-        <h3>{article.title}</h3>
-        <small>{publishedAt}</small>
-      </Link>
-    </div>
-  );
-}
-
-// NOTE: https://shopify.dev/docs/api/storefront/latest/objects/blog
-const BLOGS_QUERY = `#graphql
-  query Blog(
+const BLOG_ARTICLES_QUERY = gql`
+  ${ARTICLE_FRAGMENT}
+  query BlogArticlesQuery(
     $language: LanguageCode
     $blogHandle: String!
-    $first: Int
-    $last: Int
-    $startCursor: String
-    $endCursor: String
+    $pageBy: Int!
+    $cursor: String
   ) @inContext(language: $language) {
     blog(handle: $blogHandle) {
       title
@@ -139,49 +78,11 @@ const BLOGS_QUERY = `#graphql
         title
         description
       }
-      articles(
-        first: $first,
-        last: $last,
-        before: $startCursor,
-        after: $endCursor
-      ) {
+      articles(first: $pageBy, after: $cursor) {
         nodes {
-          ...ArticleItem
+          ...Article
         }
-        pageInfo {
-          hasPreviousPage
-          hasNextPage
-          hasNextPage
-          endCursor
-          startCursor
-        }
-
       }
     }
   }
-  fragment ArticleItem on Article {
-    author: authorV2 {
-      name
-    }
-    contentHtml
-    handle
-    id
-    image {
-      id
-      altText
-      url
-      width
-      height
-    }
-    publishedAt
-    title
-    blog {
-      handle
-    }
-  }
 `;
-
-/** @typedef {import('@shopify/remix-oxygen').LoaderFunctionArgs} LoaderFunctionArgs */
-/** @template T @typedef {import('react-router').MetaFunction<T>} MetaFunction */
-/** @typedef {import('storefrontapi.generated').ArticleItemFragment} ArticleItemFragment */
-/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */

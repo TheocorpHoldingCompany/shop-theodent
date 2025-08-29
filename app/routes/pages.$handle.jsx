@@ -1,92 +1,79 @@
-import {useLoaderData} from 'react-router';
-import {redirectIfHandleIsLocalized} from '~/lib/redirect';
+// app/routes/pages.$handle.jsx
 
-/**
- * @type {MetaFunction<typeof loader>}
- */
-export const meta = ({data}) => {
-  return [{title: `Hydrogen | ${data?.page.title ?? ''}`}];
-};
+import {json} from '@shopify/remix-oxygen';
+import { useLoaderData } from 'react-router';
+import {useEffect} from 'react';
+import {gql} from '@shopify/hydrogen';
 
-/**
- * @param {LoaderFunctionArgs} args
- */
-export async function loader(args) {
-  // Start fetching non-critical data without blocking time to first byte
-  const deferredData = loadDeferredData(args);
+// Import our special components
+import {ClinicalForm} from '~/components/forms/ClinicalForm';
+import {WholesaleForm} from '~/components/forms/WholesaleForm';
+import {StoreLocator} from '~/components/sections/StoreLocator';
 
-  // Await the critical data required to render initial state of the page
-  const criticalData = await loadCriticalData(args);
+export async function loader({params, context}) {
+  const {handle} = params;
+  const {storefront} = context;
 
-  return {...deferredData, ...criticalData};
-}
-
-/**
- * Load data necessary for rendering content above the fold. This is the critical data
- * needed to render the page. If it's unavailable, the whole page should 400 or 500 error.
- * @param {LoaderFunctionArgs}
- */
-async function loadCriticalData({context, request, params}) {
-  if (!params.handle) {
-    throw new Error('Missing page handle');
-  }
-
-  const [{page}] = await Promise.all([
-    context.storefront.query(PAGE_QUERY, {
-      variables: {
-        handle: params.handle,
-      },
-    }),
-    // Add other queries here, so that they are loaded in parallel
-  ]);
+  const {page} = await storefront.query(PAGE_QUERY, {
+    variables: {handle},
+  });
 
   if (!page) {
-    throw new Response('Not Found', {status: 404});
+    throw new Response(null, {status: 404});
   }
 
-  redirectIfHandleIsLocalized(request, {handle: params.handle, data: page});
-
-  return {
-    page,
-  };
+  return json({page});
 }
 
-/**
- * Load data for rendering content below the fold. This data is deferred and will be
- * fetched after the initial page load. If it's unavailable, the page should still 200.
- * Make sure to not throw any errors here, as it will cause the page to 500.
- * @param {LoaderFunctionArgs}
- */
-function loadDeferredData({context}) {
-  return {};
+export function meta({data}) {
+  const {page} = data;
+  return [
+    {title: page?.seo?.title ?? page?.title ?? 'Page'},
+    {description: page?.seo?.description ?? page?.bodySummary},
+  ];
 }
 
 export default function Page() {
-  /** @type {LoaderReturnData} */
   const {page} = useLoaderData();
 
+  // A component to render the appropriate content based on the page handle
+  function PageContent({page}) {
+    switch (page.handle) {
+      case 'clinical-information':
+        return <ClinicalForm />;
+      case 'wholesale':
+        return <WholesaleForm />;
+      case 'store-locator':
+        return <StoreLocator />;
+      default:
+        // For all other pages, render the content from the Shopify Admin
+        return (
+          <div
+            dangerouslySetInnerHTML={{__html: page.body}}
+            className="prose max-w-none"
+          />
+        );
+    }
+  }
+
   return (
-    <div className="page">
-      <header>
-        <h1>{page.title}</h1>
-      </header>
-      <main dangerouslySetInnerHTML={{__html: page.body}} />
+    <div className="container py-8 md:py-12">
+      <h1 className="mb-8 text-4xl font-bold text-center">{page.title}</h1>
+      <div className="max-w-4xl mx-auto">
+        <PageContent page={page} />
+      </div>
     </div>
   );
 }
 
-const PAGE_QUERY = `#graphql
-  query Page(
-    $language: LanguageCode,
-    $country: CountryCode,
-    $handle: String!
-  )
-  @inContext(language: $language, country: $country) {
+const PAGE_QUERY = gql`
+  query Page($handle: String!) {
     page(handle: $handle) {
-      handle
       id
       title
+      handle
       body
+      bodySummary
       seo {
         description
         title
@@ -94,7 +81,3 @@ const PAGE_QUERY = `#graphql
     }
   }
 `;
-
-/** @typedef {import('@shopify/remix-oxygen').LoaderFunctionArgs} LoaderFunctionArgs */
-/** @template T @typedef {import('react-router').MetaFunction<T>} MetaFunction */
-/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */

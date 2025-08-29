@@ -1,51 +1,49 @@
-import {useLocation} from 'react-router';
+// app/lib/variants.js
+
+import { useLocation, useSearchParams } from 'react-router';
 import {useMemo} from 'react';
 
 /**
- * @param {string} handle
- * @param {SelectedOption[]} [selectedOptions]
+ * A utility function to find the selected variant from a product's variants based on URL search params.
+ * @param {Product['variants']} variants - The variants for a product.
+ * @param {URLSearchParams} searchParams - The search params from the URL.
+ * @returns {ProductVariant | undefined} The selected variant or the first available variant.
  */
-export function useVariantUrl(handle, selectedOptions) {
-  const {pathname} = useLocation();
+export function findSelectedVariant(variants, searchParams) {
+  // Find the variant where all selected options match the search params.
+  const selected = variants.nodes.find((variant) =>
+    variant.selectedOptions.every((option) => {
+      const valueInParams = searchParams.get(option.name.toLowerCase());
+      return valueInParams === option.value.toLowerCase();
+    }),
+  );
 
-  return useMemo(() => {
-    return getVariantUrl({
-      handle,
-      pathname,
-      searchParams: new URLSearchParams(),
-      selectedOptions,
-    });
-  }, [handle, selectedOptions, pathname]);
+  // If no variant matches, return the first available variant.
+  return selected || variants.nodes.find((variant) => variant.availableForSale);
 }
 
 /**
- * @param {{
- *   handle: string;
- *   pathname: string;
- *   searchParams: URLSearchParams;
- *   selectedOptions?: SelectedOption[];
+ * A client-side hook that reads the URL and returns the selected variant.
+ * @param {Product['variants']} variants
+ * @returns {{
+ * selectedVariant: ProductVariant | undefined;
+ * getVariantUrl: (name: string, value: string) => string;
  * }}
  */
-export function getVariantUrl({
-  handle,
-  pathname,
-  searchParams,
-  selectedOptions,
-}) {
-  const match = /(\/[a-zA-Z]{2}-[a-zA-Z]{2}\/)/g.exec(pathname);
-  const isLocalePathname = match && match.length > 0;
+export function useVariantUrl(productHandle, variants) {
+  const {pathname} = useLocation();
+  const [searchParams] = useSearchParams();
 
-  const path = isLocalePathname
-    ? `${match[0]}products/${handle}`
-    : `/products/${handle}`;
+  const selectedVariant = useMemo(
+    () => findSelectedVariant(variants, searchParams),
+    [variants, searchParams],
+  );
 
-  selectedOptions?.forEach((option) => {
-    searchParams.set(option.name, option.value);
-  });
+  const getVariantUrl = (name, value) => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set(name.toLowerCase(), value.toLowerCase());
+    return `${pathname}?${newParams.toString()}`;
+  };
 
-  const searchString = searchParams.toString();
-
-  return path + (searchString ? '?' + searchParams.toString() : '');
+  return {selectedVariant, getVariantUrl};
 }
-
-/** @typedef {import('@shopify/hydrogen/storefront-api-types').SelectedOption} SelectedOption */

@@ -1,179 +1,183 @@
-import {Await, useLoaderData, Link} from 'react-router';
+// app/routes/_index.jsx
+import {gql} from '@shopify/hydrogen';
+import {defer} from '@shopify/remix-oxygen';
+import {Await, useLoaderData, Link} from 'react-router'; // Changed from '@remix-run/react'
 import {Suspense} from 'react';
 import {Image} from '@shopify/hydrogen';
-import {ProductItem} from '~/components/ProductItem';
+import {PRODUCT_CARD_FRAGMENT} from '~/lib/fragments';
+import {ARTICLE_FRAGMENT} from '~/lib/fragments'; // We will create this fragment
 
-/**
- * @type {MetaFunction}
- */
-export const meta = () => {
-  return [{title: 'Hydrogen | Home'}];
-};
+// Import the components
+import {ProductCard} from '~/components/cards/ProductCard';
+import {Hero} from '~/components/sections/Hero';
+import {VideoSection} from '~/components/sections/VideoSection';
+import {Compare} from '~/components/sections/Compare';
+import {FeaturedBlogs} from '~/components/sections/FeaturedBlogs';
+import {IconBar} from '~/components/sections/IconBar';
+import {FDAAnnouncementPopup} from '~/components/global/FDAAnnouncementPopup';
 
-/**
- * @param {LoaderFunctionArgs} args
- */
-export async function loader(args) {
-  // Start fetching non-critical data without blocking time to first byte
-  const deferredData = loadDeferredData(args);
+export async function loader({context}) {
+  const {storefront} = context;
+  const {shop} = await storefront.query(HOMEPAGE_SEO_QUERY);
 
-  // Await the critical data required to render initial state of the page
-  const criticalData = await loadCriticalData(args);
+  // Defer loading of the main content for faster initial page loads
+  const homepage = storefront.query(HOMEPAGE_CONTENT_QUERY, {
+    variables: {
+      country: storefront.i18n.country,
+      language: storefront.i18n.language,
+      blogHandle: 'news-1', // Your blog handle
+    },
+  });
 
-  return {...deferredData, ...criticalData};
+  return defer({
+    shop,
+    homepage,
+  });
 }
 
-/**
- * Load data necessary for rendering content above the fold. This is the critical data
- * needed to render the page. If it's unavailable, the whole page should 400 or 500 error.
- * @param {LoaderFunctionArgs}
- */
-async function loadCriticalData({context}) {
-  const [{collections}] = await Promise.all([
-    context.storefront.query(FEATURED_COLLECTION_QUERY),
-    // Add other queries here, so that they are loaded in parallel
-  ]);
-
-  return {
-    featuredCollection: collections.nodes[0],
-  };
-}
-
-/**
- * Load data for rendering content below the fold. This data is deferred and will be
- * fetched after the initial page load. If it's unavailable, the page should still 200.
- * Make sure to not throw any errors here, as it will cause the page to 500.
- * @param {LoaderFunctionArgs}
- */
-function loadDeferredData({context}) {
-  const recommendedProducts = context.storefront
-    .query(RECOMMENDED_PRODUCTS_QUERY)
-    .catch((error) => {
-      // Log query errors, but don't throw them so the page can still render
-      console.error(error);
-      return null;
-    });
-
-  return {
-    recommendedProducts,
-  };
+export function meta({data}) {
+  return [
+    {title: data.shop.name},
+    {description: data.shop.description},
+  ];
 }
 
 export default function Homepage() {
-  /** @type {LoaderReturnData} */
-  const data = useLoaderData();
-  return (
-    <div className="home">
-      <FeaturedCollection collection={data.featuredCollection} />
-      <RecommendedProducts products={data.recommendedProducts} />
-    </div>
-  );
-}
+  const {shop, homepage} = useLoaderData();
 
-/**
- * @param {{
- *   collection: FeaturedCollectionFragment;
- * }}
- */
-function FeaturedCollection({collection}) {
-  if (!collection) return null;
-  const image = collection?.image;
   return (
-    <Link
-      className="featured-collection"
-      to={`/collections/${collection.handle}`}
-    >
-      {image && (
-        <div className="featured-collection-image">
-          <Image data={image} sizes="100vw" />
-        </div>
-      )}
-      <h1>{collection.title}</h1>
-    </Link>
-  );
-}
-
-/**
- * @param {{
- *   products: Promise<RecommendedProductsQuery | null>;
- * }}
- */
-function RecommendedProducts({products}) {
-  return (
-    <div className="recommended-products">
-      <h2>Recommended Products</h2>
-      <Suspense fallback={<div>Loading...</div>}>
-        <Await resolve={products}>
-          {(response) => (
-            <div className="recommended-products-grid">
-              {response
-                ? response.products.nodes.map((product) => (
-                    <ProductItem key={product.id} product={product} />
-                  ))
-                : null}
-            </div>
+    <>
+      <Hero />
+      <VideoSection />
+      <Suspense>
+        <Await resolve={homepage}>
+          {({featuredProducts, articles}) => (
+            <>
+              <FeaturedProducts products={featuredProducts.nodes} />
+              <HomepageInfoSections />
+              <Compare />
+              <FeaturedBlogs articles={articles.nodes} />
+            </>
           )}
         </Await>
       </Suspense>
-      <br />
+      <IconBar />
+      <FDAAnnouncementPopup />
+
+      {/* Structured Data (JSON-LD) for SEO */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'Organization',
+            name: 'Theodent',
+            url: 'https://shoptheodent.com',
+            logo: 'https://shoptheodent.com/imgs/theodent-logo.png',
+          }),
+        }}
+      />
+    </>
+  );
+}
+
+function FeaturedProducts({products}) {
+  return (
+    <div className="py-12 px-4">
+      <h2 className="text-3xl font-bold text-center mb-8">Featured Products</h2>
+      <div className="grid grid-cols-1 gap-y-10 gap-x-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {products.map((product) => (
+          <ProductCard key={product.id} product={product} />
+        ))}
+      </div>
     </div>
   );
 }
 
-const FEATURED_COLLECTION_QUERY = `#graphql
-  fragment FeaturedCollection on Collection {
-    id
-    title
-    image {
-      id
-      url
-      altText
-      width
-      height
-    }
-    handle
-  }
-  query FeaturedCollection($country: CountryCode, $language: LanguageCode)
-    @inContext(country: $country, language: $language) {
-    collections(first: 1, sortKey: UPDATED_AT, reverse: true) {
-      nodes {
-        ...FeaturedCollection
-      }
+function HomepageInfoSections() {
+  return (
+    <div className="overflow-x-hidden text-[#2A1B16] py-12">
+      {/* Section 1 */}
+      <div className="flex flex-col md:flex-row items-center">
+        <div className="w-full md:w-1/2">
+          <Image
+            src="/imgs/greenHome1.png"
+            alt="Theodent fluoride-free toothpaste with Rennou technology"
+            className="object-cover w-full h-full max-h-[660px]"
+            width={800}
+            height={800}
+          />
+        </div>
+        <div className="w-full md:w-1/2 p-8 flex justify-center">
+          <div className="max-w-md">
+            <h2 className="text-3xl font-bold theo-h1 theo-info-h1">
+              What Makes Theodent the #1 Fluoride Alternative?
+            </h2>
+            <p className="mt-3 mb-4 theo-h3">
+              Theodent is a breakthrough in fluoride-free oral care. Our patented Rennou™ technology harnesses cacao to remineralize tooth enamel safely and effectively.
+            </p>
+            <Link to="/pages/technology" className="theo-btn">
+              Learn More About the Technology
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 2 */}
+      <div className="flex flex-col md:flex-row-reverse items-center">
+        <div className="w-full md:w-1/2">
+          <Image
+            src="/imgs/greenHome2.webp"
+            alt="Premium ingredients in Theodent cacao-based toothpaste"
+            className="object-cover w-full h-full max-h-[660px]"
+            width={800}
+            height={800}
+          />
+        </div>
+        <div className="w-full md:w-1/2 p-8 flex justify-center">
+          <div className="max-w-md text-left md:text-right">
+            <h2 className="text-3xl font-bold theo-h1 theo-info-h1">
+              Committed to Premium Ingredients
+            </h2>
+            <p className="mt-3 mb-4 theo-h3">
+              We use only the finest ingredients in our fluoride-free formulations, ensuring safety and effectiveness for your entire family.
+            </p>
+            <Link to="/pages/ingredients" className="theo-btn">
+              Explore Our Ingredients
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// GraphQL queries that you'll need
+const HOMEPAGE_SEO_QUERY = `#graphql
+  query HomePageSeoQuery {
+    shop {
+      name
+      description
     }
   }
 `;
 
-const RECOMMENDED_PRODUCTS_QUERY = `#graphql
-  fragment RecommendedProduct on Product {
-    id
-    title
-    handle
-    priceRange {
-      minVariantPrice {
-        amount
-        currencyCode
-      }
-    }
-    featuredImage {
-      id
-      url
-      altText
-      width
-      height
-    }
-  }
-  query RecommendedProducts ($country: CountryCode, $language: LanguageCode)
-    @inContext(country: $country, language: $language) {
-    products(first: 4, sortKey: UPDATED_AT, reverse: true) {
+const HOMEPAGE_CONTENT_QUERY = `#graphql
+  query HomePageContentQuery($country: CountryCode, $language: LanguageCode, $blogHandle: String!) 
+  @inContext(country: $country, language: $language) {
+    featuredProducts: products(first: 8, query: "tag:featured") {
       nodes {
-        ...RecommendedProduct
+        ...ProductCard
+      }
+    }
+    articles: blog(handle: $blogHandle) {
+      articles(first: 3) {
+        nodes {
+          ...Article
+        }
       }
     }
   }
+  ${PRODUCT_CARD_FRAGMENT}
+  ${ARTICLE_FRAGMENT}
 `;
-
-/** @typedef {import('@shopify/remix-oxygen').LoaderFunctionArgs} LoaderFunctionArgs */
-/** @template T @typedef {import('react-router').MetaFunction<T>} MetaFunction */
-/** @typedef {import('storefrontapi.generated').FeaturedCollectionFragment} FeaturedCollectionFragment */
-/** @typedef {import('storefrontapi.generated').RecommendedProductsQuery} RecommendedProductsQuery */
-/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */

@@ -1,173 +1,112 @@
-import {redirect} from '@shopify/remix-oxygen';
-import {useLoaderData} from 'react-router';
-import {getPaginationVariables, Analytics} from '@shopify/hydrogen';
-import {PaginatedResourceSection} from '~/components/PaginatedResourceSection';
-import {redirectIfHandleIsLocalized} from '~/lib/redirect';
-import {ProductItem} from '~/components/ProductItem';
+// app/routes/collections.$handle.jsx
 
-/**
- * @type {MetaFunction<typeof loader>}
- */
-export const meta = ({data}) => {
-  return [{title: `Hydrogen | ${data?.collection.title ?? ''} Collection`}];
-};
+import {json, defer} from '@shopify/remix-oxygen';
+import { useLoaderData } from 'react-router';
+import {gql} from '@shopify/hydrogen';
 
-/**
- * @param {LoaderFunctionArgs} args
- */
-export async function loader(args) {
-  // Start fetching non-critical data without blocking time to first byte
-  const deferredData = loadDeferredData(args);
+import {PRODUCT_CARD_FRAGMENT} from '~/lib/fragments';
+import {ProductGrid} from '~/components/product/ProductGrid';
 
-  // Await the critical data required to render initial state of the page
-  const criticalData = await loadCriticalData(args);
-
-  return {...deferredData, ...criticalData};
-}
-
-/**
- * Load data necessary for rendering content above the fold. This is the critical data
- * needed to render the page. If it's unavailable, the whole page should 400 or 500 error.
- * @param {LoaderFunctionArgs}
- */
-async function loadCriticalData({context, params, request}) {
+// This is the server-side function that fetches the data for the collection.
+export async function loader({params, request, context}) {
   const {handle} = params;
   const {storefront} = context;
-  const paginationVariables = getPaginationVariables(request, {
-    pageBy: 8,
+
+  // The `new URL(request.url)` gets the pagination cursor from the URL search params.
+  const searchParams = new URL(request.url).searchParams;
+  const cursor = searchParams.get('cursor');
+
+  const {collection} = await storefront.query(COLLECTION_QUERY, {
+    variables: {
+      handle,
+      cursor,
+      country: storefront.i18n.country,
+      language: storefront.i18n.language,
+    },
   });
 
-  if (!handle) {
-    throw redirect('/collections');
-  }
-
-  const [{collection}] = await Promise.all([
-    storefront.query(COLLECTION_QUERY, {
-      variables: {handle, ...paginationVariables},
-      // Add other queries here, so that they are loaded in parallel
-    }),
-  ]);
-
+  // Handle 404s
   if (!collection) {
-    throw new Response(`Collection ${handle} not found`, {
-      status: 404,
-    });
+    throw new Response(null, {status: 404});
   }
 
-  // The API handle might be localized, so redirect to the localized handle
-  redirectIfHandleIsLocalized(request, {handle, data: collection});
+  // When a user scrolls and the `ProductGrid` fetches more products,
+  // this loader will be called again, but as a POST request.
+  // We handle that here and return only the data needed for the grid.
+  if (request.method === 'POST') {
+    return json({collection});
+  }
 
-  return {
-    collection,
-  };
+  return defer({collection});
 }
 
-/**
- * Load data for rendering content below the fold. This data is deferred and will be
- * fetched after the initial page load. If it's unavailable, the page should still 200.
- * Make sure to not throw any errors here, as it will cause the page to 500.
- * @param {LoaderFunctionArgs}
- */
-function loadDeferredData({context}) {
-  return {};
+// This function sets the SEO meta tags for the page.
+export function meta({data}) {
+  const {collection} = data;
+  return [
+    {title: collection?.title ?? 'Collection'},
+    {description: collection?.description},
+  ];
 }
 
 export default function Collection() {
-  /** @type {LoaderReturnData} */
   const {collection} = useLoaderData();
 
   return (
-    <div className="collection">
-      <h1>{collection.title}</h1>
-      <p className="collection-description">{collection.description}</p>
-      <PaginatedResourceSection
-        connection={collection.products}
-        resourcesClassName="products-grid"
-      >
-        {({node: product, index}) => (
-          <ProductItem
-            key={product.id}
-            product={product}
-            loading={index < 8 ? 'eager' : undefined}
-          />
+    <div className="container py-8 md:py-12">
+      <div className="mb-8 text-center">
+        <h1 className="text-4xl font-bold">{collection.title}</h1>
+        {collection.description && (
+          <p className="max-w-2xl mx-auto mt-4 text-lg text-gray-600">
+            {collection.description}
+          </p>
         )}
-      </PaginatedResourceSection>
-      <Analytics.CollectionView
-        data={{
-          collection: {
-            id: collection.id,
-            handle: collection.handle,
-          },
-        }}
+      </div>
+      <ProductGrid
+        key={collection.id}
+        collection={collection}
+        url={`/collections/${collection.handle}`}
       />
     </div>
   );
 }
 
-const PRODUCT_ITEM_FRAGMENT = `#graphql
-  fragment MoneyProductItem on MoneyV2 {
-    amount
-    currencyCode
-  }
-  fragment ProductItem on Product {
-    id
-    handle
-    title
-    featuredImage {
-      id
-      altText
-      url
-      width
-      height
-    }
-    priceRange {
-      minVariantPrice {
-        ...MoneyProductItem
-      }
-      maxVariantPrice {
-        ...MoneyProductItem
-      }
-    }
-  }
-`;
-
-// NOTE: https://shopify.dev/docs/api/storefront/2022-04/objects/collection
-const COLLECTION_QUERY = `#graphql
-  ${PRODUCT_ITEM_FRAGMENT}
-  query Collection(
+// The GraphQL query to fetch a collection and its products.
+// It includes pagination for infinite scroll.
+const COLLECTION_QUERY = gql`
+  ${PRODUCT_CARD_FRAGMENT}
+  query CollectionDetails(
     $handle: String!
     $country: CountryCode
     $language: LanguageCode
-    $first: Int
-    $last: Int
-    $startCursor: String
-    $endCursor: String
+    $pageBy: Int = 24
+    $cursor: String
   ) @inContext(country: $country, language: $language) {
     collection(handle: $handle) {
       id
-      handle
       title
       description
-      products(
-        first: $first,
-        last: $last,
-        before: $startCursor,
-        after: $endCursor
-      ) {
+      handle
+      seo {
+        description
+        title
+      }
+      image {
+        id
+        url
+        width
+        height
+        altText
+      }
+      products(first: $pageBy, after: $cursor) {
         nodes {
-          ...ProductItem
+          ...ProductCard
         }
         pageInfo {
-          hasPreviousPage
           hasNextPage
           endCursor
-          startCursor
         }
       }
     }
   }
 `;
-
-/** @typedef {import('@shopify/remix-oxygen').LoaderFunctionArgs} LoaderFunctionArgs */
-/** @template T @typedef {import('react-router').MetaFunction<T>} MetaFunction */
-/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */

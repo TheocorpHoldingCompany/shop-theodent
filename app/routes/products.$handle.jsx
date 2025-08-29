@@ -1,244 +1,171 @@
-import {useLoaderData} from 'react-router';
+// app/routes/products.$handle.jsx
+
+import {defer} from '@shopify/remix-oxygen';
+import { Await, useLoaderData } from 'react-router';
+import {Suspense} from 'react';
+import {gql} from '@shopify/hydrogen';
+
 import {
-  getSelectedProductOptions,
-  Analytics,
-  useOptimisticVariant,
-  getProductOptions,
-  getAdjacentAndFirstAvailableVariants,
-  useSelectedOptionInUrlParam,
+  Image,
+  Money,
+  flattenConnection,
 } from '@shopify/hydrogen';
-import {ProductPrice} from '~/components/ProductPrice';
-import {ProductImage} from '~/components/ProductImage';
-import {ProductForm} from '~/components/ProductForm';
-import {redirectIfHandleIsLocalized} from '~/lib/redirect';
+import {findSelectedVariant, useVariantUrl} from '~/lib/variants';
+
+// Import all the product page components we've migrated
+import {ProductGallery} from '~/components/product/ProductGallery';
+import {ProductForm} from '~/components/product/ProductForm';
+import {ProductAccordion} from '~/components/product/ProductAccordion';
 
 /**
- * @type {MetaFunction<typeof loader>}
+ * The `loader` function runs on the server to fetch the product data.
  */
-export const meta = ({data}) => {
-  return [
-    {title: `Hydrogen | ${data?.product.title ?? ''}`},
-    {
-      rel: 'canonical',
-      href: `/products/${data?.product.handle}`,
-    },
-  ];
-};
-
-/**
- * @param {LoaderFunctionArgs} args
- */
-export async function loader(args) {
-  // Start fetching non-critical data without blocking time to first byte
-  const deferredData = loadDeferredData(args);
-
-  // Await the critical data required to render initial state of the page
-  const criticalData = await loadCriticalData(args);
-
-  return {...deferredData, ...criticalData};
-}
-
-/**
- * Load data necessary for rendering content above the fold. This is the critical data
- * needed to render the page. If it's unavailable, the whole page should 400 or 500 error.
- * @param {LoaderFunctionArgs}
- */
-async function loadCriticalData({context, params, request}) {
+export async function loader({params, request, context}) {
   const {handle} = params;
   const {storefront} = context;
 
-  if (!handle) {
-    throw new Error('Expected product handle to be defined');
-  }
+  // Get the search params from the URL
+  const searchParams = new URL(request.url).searchParams;
 
-  const [{product}] = await Promise.all([
-    storefront.query(PRODUCT_QUERY, {
-      variables: {handle, selectedOptions: getSelectedProductOptions(request)},
-    }),
-    // Add other queries here, so that they are loaded in parallel
-  ]);
+  const {product} = await storefront.query(PRODUCT_QUERY, {
+    variables: {
+      handle,
+      country: storefront.i18n.country,
+      language: storefront.i18n.language,
+    },
+  });
 
   if (!product?.id) {
     throw new Response(null, {status: 404});
   }
 
-  // The API handle might be localized, so redirect to the localized handle
-  redirectIfHandleIsLocalized(request, {handle, data: product});
+  // Find the selected variant based on the URL search params.
+  const selectedVariant = findSelectedVariant(product.variants, searchParams);
 
-  return {
+  return defer({
     product,
-  };
+    selectedVariant,
+  });
 }
 
 /**
- * Load data for rendering content below the fold. This data is deferred and will be
- * fetched after the initial page load. If it's unavailable, the page should still 200.
- * Make sure to not throw any errors here, as it will cause the page to 500.
- * @param {LoaderFunctionArgs}
+ * The `meta` function sets the SEO tags for the page.
  */
-function loadDeferredData({context, params}) {
-  // Put any API calls that is not critical to be available on first page render
-  // For example: product reviews, product recommendations, social feeds.
-
-  return {};
+export function meta({data}) {
+  const {product} = data;
+  return [
+    {title: product?.title ?? 'Product'},
+    {description: product?.description},
+    // You can add more meta tags here, like for Open Graph images
+  ];
 }
 
 export default function Product() {
-  /** @type {LoaderReturnData} */
-  const {product} = useLoaderData();
+  const {product, selectedVariant} = useLoaderData();
+  const {media, title, vendor, descriptionHtml} = product;
 
-  // Optimistically selects a variant with given available variant information
-  const selectedVariant = useOptimisticVariant(
-    product.selectedOrFirstAvailableVariant,
-    getAdjacentAndFirstAvailableVariants(product),
+  // This client-side hook ensures the selected variant updates when the URL changes.
+  const {selectedVariant: clientSelectedVariant} = useVariantUrl(
+    product.handle,
+    product.variants,
   );
 
-  // Sets the search param to the selected variant without navigation
-  // only when no search params are set in the url
-  useSelectedOptionInUrlParam(selectedVariant.selectedOptions);
-
-  // Get the product options array
-  const productOptions = getProductOptions({
-    ...product,
-    selectedOrFirstAvailableVariant: selectedVariant,
-  });
-
-  const {title, descriptionHtml} = product;
+  const finalSelectedVariant = clientSelectedVariant || selectedVariant;
 
   return (
-    <div className="product">
-      <ProductImage image={selectedVariant?.image} />
-      <div className="product-main">
-        <h1>{title}</h1>
-        <ProductPrice
-          price={selectedVariant?.price}
-          compareAtPrice={selectedVariant?.compareAtPrice}
-        />
-        <br />
-        <ProductForm
-          productOptions={productOptions}
-          selectedVariant={selectedVariant}
-        />
-        <br />
-        <br />
-        <p>
-          <strong>Description</strong>
-        </p>
-        <br />
-        <div dangerouslySetInnerHTML={{__html: descriptionHtml}} />
-        <br />
+    <div className="container py-8 md:py-12">
+      <div className="grid grid-cols-1 gap-8 md:grid-cols-2 md:gap-12">
+        {/* Left Column: Product Gallery */}
+        <div className="md:sticky top-24 h-max">
+          <ProductGallery media={media.nodes} />
+        </div>
+
+        {/* Right Column: Product Details & Form */}
+        <div className="flex flex-col gap-6">
+          <div>
+            <h1 className="text-3xl font-bold md:text-4xl">{title}</h1>
+            <p className="text-lg text-gray-500">{vendor}</p>
+          </div>
+
+          <ProductForm
+            product={{
+              ...product,
+              selectedVariant: finalSelectedVariant, // Pass the correct selected variant
+            }}
+          />
+
+          <div
+            className="prose"
+            dangerouslySetInnerHTML={{__html: descriptionHtml}}
+          />
+
+          {/* Example of using the accordion for extra details */}
+          <ProductAccordion title="Shipping & Returns" content="Details about shipping and returns go here." />
+          <ProductAccordion title="Ingredients" content="Details about the ingredients go here." />
+        </div>
       </div>
-      <Analytics.ProductView
-        data={{
-          products: [
-            {
-              id: product.id,
-              title: product.title,
-              price: selectedVariant?.price.amount || '0',
-              vendor: product.vendor,
-              variantId: selectedVariant?.id || '',
-              variantTitle: selectedVariant?.title || '',
-              quantity: 1,
-            },
-          ],
-        }}
-      />
     </div>
   );
 }
 
-const PRODUCT_VARIANT_FRAGMENT = `#graphql
-  fragment ProductVariant on ProductVariant {
-    availableForSale
-    compareAtPrice {
-      amount
-      currencyCode
-    }
-    id
-    image {
-      __typename
+// The GraphQL query for a single product page.
+const PRODUCT_QUERY = gql`
+  query Product(
+    $country: CountryCode
+    $language: LanguageCode
+    $handle: String!
+  ) @inContext(country: $country, language: $language) {
+    product(handle: $handle) {
       id
-      url
-      altText
-      width
-      height
-    }
-    price {
-      amount
-      currencyCode
-    }
-    product {
       title
+      vendor
       handle
-    }
-    selectedOptions {
-      name
-      value
-    }
-    sku
-    title
-    unitPrice {
-      amount
-      currencyCode
-    }
-  }
-`;
-
-const PRODUCT_FRAGMENT = `#graphql
-  fragment Product on Product {
-    id
-    title
-    vendor
-    handle
-    descriptionHtml
-    description
-    encodedVariantExistence
-    encodedVariantAvailability
-    options {
-      name
-      optionValues {
+      descriptionHtml
+      options {
         name
-        firstSelectableVariant {
-          ...ProductVariant
-        }
-        swatch {
-          color
+        values
+      }
+      media(first: 20) {
+        nodes {
+          id
+          mediaContentType
           image {
-            previewImage {
-              url
-            }
+            id
+            url
+            altText
+            width
+            height
           }
         }
       }
-    }
-    selectedOrFirstAvailableVariant(selectedOptions: $selectedOptions, ignoreUnknownOptions: true, caseInsensitiveMatch: true) {
-      ...ProductVariant
-    }
-    adjacentVariants (selectedOptions: $selectedOptions) {
-      ...ProductVariant
-    }
-    seo {
-      description
-      title
+      variants(first: 100) {
+        nodes {
+          id
+          availableForSale
+          selectedOptions {
+            name
+            value
+          }
+          price {
+            amount
+            currencyCode
+          }
+          compareAtPrice {
+            amount
+            currencyCode
+          }
+          sku
+          title
+          unitPrice {
+            amount
+            currencyCode
+          }
+        }
+      }
+      seo {
+        description
+        title
+      }
     }
   }
-  ${PRODUCT_VARIANT_FRAGMENT}
 `;
-
-const PRODUCT_QUERY = `#graphql
-  query Product(
-    $country: CountryCode
-    $handle: String!
-    $language: LanguageCode
-    $selectedOptions: [SelectedOptionInput!]!
-  ) @inContext(country: $country, language: $language) {
-    product(handle: $handle) {
-      ...Product
-    }
-  }
-  ${PRODUCT_FRAGMENT}
-`;
-
-/** @typedef {import('@shopify/remix-oxygen').LoaderFunctionArgs} LoaderFunctionArgs */
-/** @template T @typedef {import('react-router').MetaFunction<T>} MetaFunction */
-/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */

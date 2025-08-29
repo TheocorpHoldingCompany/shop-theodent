@@ -1,121 +1,103 @@
-import {useLoaderData} from 'react-router';
+// app/routes/blogs.$blogHandle.$articleHandle.jsx
+
+import {json} from '@shopify/remix-oxygen';
+import { useLoaderData, Link } from 'react-router';
 import {Image} from '@shopify/hydrogen';
-import {redirectIfHandleIsLocalized} from '~/lib/redirect';
+import gql from 'graphql-tag';
 
-/**
- * @type {MetaFunction<typeof loader>}
- */
-export const meta = ({data}) => {
-  return [{title: `Hydrogen | ${data?.article.title ?? ''} article`}];
-};
+// import {IconBar} from '~/components/sections/IconBar';
 
-/**
- * @param {LoaderFunctionArgs} args
- */
-export async function loader(args) {
-  // Start fetching non-critical data without blocking time to first byte
-  const deferredData = loadDeferredData(args);
-
-  // Await the critical data required to render initial state of the page
-  const criticalData = await loadCriticalData(args);
-
-  return {...deferredData, ...criticalData};
-}
-
-/**
- * Load data necessary for rendering content above the fold. This is the critical data
- * needed to render the page. If it's unavailable, the whole page should 400 or 500 error.
- * @param {LoaderFunctionArgs}
- */
-async function loadCriticalData({context, request, params}) {
+export async function loader({params, context}) {
   const {blogHandle, articleHandle} = params;
+  const {storefront} = context;
 
-  if (!articleHandle || !blogHandle) {
-    throw new Response('Not found', {status: 404});
-  }
-
-  const [{blog}] = await Promise.all([
-    context.storefront.query(ARTICLE_QUERY, {
-      variables: {blogHandle, articleHandle},
-    }),
-    // Add other queries here, so that they are loaded in parallel
-  ]);
+  const {blog} = await storefront.query(SINGLE_ARTICLE_QUERY, {
+    variables: {
+      blogHandle,
+      articleHandle,
+      language: storefront.i18n.language,
+    },
+  });
 
   if (!blog?.articleByHandle) {
     throw new Response(null, {status: 404});
   }
 
-  redirectIfHandleIsLocalized(
-    request,
-    {
-      handle: articleHandle,
-      data: blog.articleByHandle,
-    },
-    {
-      handle: blogHandle,
-      data: blog,
-    },
-  );
-
   const article = blog.articleByHandle;
-
-  return {article};
+  return json({article});
 }
 
-/**
- * Load data for rendering content below the fold. This data is deferred and will be
- * fetched after the initial page load. If it's unavailable, the page should still 200.
- * Make sure to not throw any errors here, as it will cause the page to 500.
- * @param {LoaderFunctionArgs}
- */
-function loadDeferredData({context}) {
-  return {};
+export function meta({data}) {
+  const {article} = data;
+  return [
+    {title: article?.seo?.title ?? article?.title},
+    {description: article?.seo?.description ?? article?.excerpt},
+  ];
 }
 
 export default function Article() {
-  /** @type {LoaderReturnData} */
   const {article} = useLoaderData();
-  const {title, image, contentHtml, author} = article;
+  const {title, image, contentHtml, publishedAt, author, excerpt} = article;
 
   const publishedDate = new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
-  }).format(new Date(article.publishedAt));
+  }).format(new Date(publishedAt));
 
   return (
-    <div className="article">
-      <h1>
-        {title}
-        <div>
-          <time dateTime={article.publishedAt}>{publishedDate}</time> &middot;{' '}
-          <address>{author?.name}</address>
-        </div>
-      </h1>
+    <>
+      {image && (
+        <Image
+          data={image}
+          className="object-cover w-full h-96"
+          sizes="100vw"
+          alt={title}
+        />
+      )}
+      <div className="container py-8 md:py-12">
+        <div className="max-w-3xl mx-auto">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold">{title}</h1>
+            <p className="mt-2 text-sm text-gray-500">
+              {publishedDate} &middot; {author.name}
+            </p>
+          </div>
 
-      {image && <Image data={image} sizes="90vw" loading="eager" />}
-      <div
-        dangerouslySetInnerHTML={{__html: contentHtml}}
-        className="article"
-      />
-    </div>
+          {excerpt && <p className="mt-8 text-xl italic">{excerpt}</p>}
+
+          <div
+            dangerouslySetInnerHTML={{__html: contentHtml}}
+            className="py-8 prose max-w-none"
+          />
+
+          <div className="py-8 border-t border-b">
+            <h2 className="mb-3 text-2xl font-bold">
+              Ready to boost your health now?
+            </h2>
+            <Link to="/products" className="theo-btn">
+              SHOP FOR THEODENT
+            </Link>
+          </div>
+          {/* <IconBar border={false} /> */}
+        </div>
+      </div>
+    </>
   );
 }
 
-// NOTE: https://shopify.dev/docs/api/storefront/latest/objects/blog#field-blog-articlebyhandle
-const ARTICLE_QUERY = `#graphql
+const SINGLE_ARTICLE_QUERY = gql`
   query Article(
-    $articleHandle: String!
-    $blogHandle: String!
-    $country: CountryCode
     $language: LanguageCode
-  ) @inContext(language: $language, country: $country) {
+    $blogHandle: String!
+    $articleHandle: String!
+  ) @inContext(language: $language) {
     blog(handle: $blogHandle) {
-      handle
       articleByHandle(handle: $articleHandle) {
-        handle
+        id
         title
         contentHtml
+        excerpt
         publishedAt
         author: authorV2 {
           name
@@ -135,7 +117,3 @@ const ARTICLE_QUERY = `#graphql
     }
   }
 `;
-
-/** @typedef {import('@shopify/remix-oxygen').LoaderFunctionArgs} LoaderFunctionArgs */
-/** @template T @typedef {import('react-router').MetaFunction<T>} MetaFunction */
-/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */
